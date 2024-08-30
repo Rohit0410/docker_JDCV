@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
 load_dotenv()
-
+from urllib.parse import urlparse
 from flask import jsonify, Flask, request
 import logging
 import base64
@@ -17,6 +17,7 @@ from nltk.tokenize import word_tokenize
 import re
 import random
 from llama_index.core import SimpleDirectoryReader
+import requests
 
 # Download NLTK data
 nltk.download('stopwords')
@@ -39,6 +40,30 @@ model = genai.GenerativeModel('gemini-1.5-flash')
 
 app = Flask(__name__)
 
+def download_file(url, save_dir):
+    try:
+        # Get the filename from the URL
+        file_name = os.path.basename(url)
+
+        # Create the full path to save the file
+        save_path = os.path.join(save_dir, file_name)
+
+        # Send a GET request to download the file
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an error if the download failed
+
+        # Write the file to the local directory
+        with open(save_path, 'wb') as file:
+            file.write(response.content)
+
+        print(f"File saved as: {save_path}")
+        return save_path
+
+    except requests.exceptions.RequestException as e:
+        print(f"An error occurred: {e}")
+        return None
+
+
 # Preprocessing function
 def preprocessing(document):
     text = document.replace('\n', ' ').replace('\t', ' ').lower()
@@ -53,7 +78,7 @@ def preprocessing(document):
 def get_gemini_response(input_text, pdf_content, prompt):
     try:
         response = model.generate_content([input_text, pdf_content, prompt], generation_config=genai.GenerationConfig(
-            temperature=0.4
+            temperature=0.7
         ))
         return response.text
     except Exception as e:
@@ -81,23 +106,27 @@ def scoring():
     score = {}
 
     try:
-        if 'jd_file' not in request.files or 'resumes' not in request.files:
+        if 'jd_file' not in request.form or 'resumes' not in request.form:
             return jsonify({'error': 'Please provide a JD file and at least one resume file.'}), 400
 
-        jd_file = request.files['jd_file']
-        resumes = request.files.getlist('resumes')
+        jd_file = request.form['jd_file']
+        resumes = request.form.getlist('resumes')
 
         os.makedirs(JD_folder_path, exist_ok=True)
         os.makedirs(resume_folder_path, exist_ok=True)
 
-        jd_file_path = os.path.join(JD_folder_path, jd_file.filename)
-        jd_file.save(jd_file_path)
+        jd_file_path=download_file(jd_file,JD_folder_path)
+        # jd_file_path = os.path.join(JD_folder_path, filename)
+        print(jd_file_path)
+        # jd_file.save(jd_file_path)
         
         resume_paths = []
         for resume in resumes:
-            resume_path = os.path.join(resume_folder_path, resume.filename)
-            resume.save(resume_path)
+            resume_path=download_file(resume,resume_folder_path)
+            # resume_path = os.path.join(resume_folder_path, filename)
+            # resume.save(resume_path)
             resume_paths.append(resume_path)
+        print(resume_paths)
 
         input_text = input_pdf_setup(jd_file_path)
         if input_text is None:
@@ -134,3 +163,5 @@ def scoring():
 
 if __name__ == '__main__':
     app.run(debug=True, port=5001)
+
+    
